@@ -1,3 +1,12 @@
+# 캐시데이터 무시
 *.pyc
 __pycache__
 .DS_Store
+
+# 로그데이터 무시
+Handler/
+Trainer/
+*.csv
+
+# 개발용 파일 무시
+DevBoard.ipynb
