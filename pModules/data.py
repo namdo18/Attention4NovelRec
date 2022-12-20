@@ -1,3 +1,9 @@
+
+# [ 버전 업데이트 내역 ]
+#   *-- v.2.0
+#       *-- trainset_full.csv 이용 : k-fold cross-validation 사용 목적, 기존의 trainset + validset
+#       *-- DatasetHandler.callDataLoader, 데이터셋 외부 입력 허용 : split 된 validset 에 대한 로더 호출 목적
+
 import torch
 import pandas as pd
 import numpy as np
@@ -85,18 +91,19 @@ class DatasetHandler :
         seqDataset = self._validEnc(attrDataset, seqDataset)
         self._splitDataset(seqDataset)
 
-    def callDataLoader(self, mode:str='trainset', batch_size=None, batch_shuffle=None) :
+    def callDataLoader(self, mode:str='trainset', dataset=None, batch_size=None, batch_shuffle=None) :
         # [ 데이터로더 호출 ]
         #   *-- 입력 모드로 사용할 데이터셋 설정(default:trainset)
+        #   *-- (v.2.0) dataset=None, 외부에서 데이터셋 입력(cross-validation 사용 목적)
         #   *-- collate_fn 함수를 통해 모델 입력(feedset) 형태로 변환(self.maxSeqLen 참고하여 패딩)
-        mode_list = ['trainset', 'validset', 'testset']
+        mode_list = ['trainset', 'validset', 'testset', 'trainset_full']
         if mode not in mode_list : 
             print(f"\n===== error message =====")
             print(f"{mode} is not in {mode_list}\n")
             raise KeyError
 
-        modeset = self.loadDataset([mode])[0]
-        feedset = FeedSet(modeset, self.maxSeqLen)
+        dataset = self.loadDataset([mode])[0] if dataset is None else dataset
+        feedset = FeedSet(dataset, self.maxSeqLen)
 
         # [ batch 비교 평가를 위해 외부 옵션 설정 허용 ]
         batch_size = batch_size if batch_size is not None else self.batch_size
@@ -121,8 +128,10 @@ class DatasetHandler :
         return dataLoader
 
     def loadDataset(self, setName:list) :
+        # [ 버전 업데이트 내용 ]
+        #   *-- (v.2.0) trainset_full 추가 : trainset+validset, cross-validation 사용 목적
         setNames = ['attrDataset', 'targetDataset', 'targetDataset_adjusted',
-                    'seqDataset', 'seqDataset_encoded', 'trainset', 'validset','testset']
+                    'seqDataset', 'seqDataset_encoded', 'trainset', 'validset','testset', 'trainset_full']
         for name in setName :
             if name not in setNames :
                 print(f"=======================================")
@@ -454,14 +463,4 @@ class DatasetHandler :
             trainset.to_csv(self.savePath+'trainset.csv')
             validset.to_csv(self.savePath+'validset.csv')
             testset.to_csv(self.savePath+'testset.csv')
-            
-
-
-
-
-
-
-
-
-
-
+        

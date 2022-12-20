@@ -1,7 +1,11 @@
+
+# [ 버전 업데이트 내역 ]
+#   *-- (v.2.0) datasetHandler 입력 -> 필요 정보 직접 입력(ModelTrainer 에서 매번 데이터셋 로드하는 불필요 감소 목적)
+
 import torch
 import numpy as np
 
-from pModules.data import DatasetHandler
+# (v.1.0) from pModules.data import DatasetHandler
 
 import os
 import pickle as pk
@@ -41,8 +45,9 @@ class NewNovelRec(torch.nn.Module) :
     baseModel = 'NewNovelRec'
     binaryCategoricalFeatures = ['expose', 'click', 'intro', 'read', 'real_read', 'collect']
     
-    def __init__(self, 
-                 datasetHandler:DatasetHandler, 
+    def __init__(self,
+                 # (v.1.0) datasetHandler:DatasetHandler,
+                 maxValueByFeatures:dict, # v.2.0
                  mode:str='NovelNet',
                  features:list=['ItemId', 'intro', 'read', 'real_read', 'read_duration', 'recency', 'novelCount', 'repeatConsumGap'],
                  novelEmbeddingSize:int=128, 
@@ -58,7 +63,7 @@ class NewNovelRec(torch.nn.Module) :
             raise KeyError      
 
         super(NewNovelRec, self).__init__()
-        self.datasetHandler = datasetHandler # preprocessing 완료 이후의 데이터셋 핸들러
+        # (v.1.0) self.datasetHandler = datasetHandler # preprocessing 완료 이후의 데이터셋 핸들러
         self.mode = mode # 성능 비교 테스트를 위한 모드 구분
         self.features = features # 학습 시, 사용할 feature 리스트
         self.device = device if device is not None else 'cuda:0' if torch.cuda.is_available() else 'cpu'
@@ -74,7 +79,7 @@ class NewNovelRec(torch.nn.Module) :
         # [ 임베딩 레이어 정의 ]
         self.EmbeddingDict = torch.nn.ModuleDict()
         gruInputSize = 0
-        maxValueByFeatures = self.datasetHandler.maxValueByFeatures # feature 별 vocab_size 의미
+        # (v.1.0) maxValueByFeatures = self.datasetHandler.maxValueByFeatures # feature 별 vocab_size 의미
         for col in self.features :
             embeddingSize = featureEmbeddingSize if col != 'ItemId' else novelEmbeddingSize
             if self.mode == 'User' :
@@ -141,8 +146,10 @@ class GRU4Rec(torch.nn.Module) :
     baseModel = 'GRU4Rec'
 
     def __init__(self, 
-                 datasetHandler:DatasetHandler,
+                 # (v.1.0) datasetHandler:DatasetHandler,
+                 maxValueByFeatures:dict, # v.2.0
                  mode:str='seq2vec',
+                 maxSeqLen:int=49, # v.2.0
                  hiddenSize:int=128, 
                  nLayer:int=1, 
                  embFLAG:bool=True, 
@@ -158,8 +165,9 @@ class GRU4Rec(torch.nn.Module) :
             raise KeyError                                
 
         super(GRU4Rec, self).__init__()
-        self.datasetHandler = datasetHandler
-        self.vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1
+        # (v.1.0) self.datasetHandler = datasetHandler
+        # (v.1.0) self.vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1
+        self.vocabSize = maxValueByFeatures['ItemId']+1 # v.2.0
         self.device = device if device is not None else 'cuda:0' if torch.cuda.is_available() else 'cpu' 
         self.name = GRU4Rec.baseModel + f"+{mode}+emb{embFLAG}{embSize if embFLAG else 0}+nLayer{nLayer}+hiddenSize{hiddenSize}+dropout{dropoutRatio}+{self.device}"
         self.conf = {'mode':mode,
@@ -187,7 +195,8 @@ class GRU4Rec(torch.nn.Module) :
         # [ 피드포워드 레이어 정의 ]
         #   *-- mode 에 따라 입력 길이 상이
         #       *-- 'seq2vec' 모드는 마지막 hidden 값을 사용 : 일반화 성능 비교 평가 목적
-        inputSize = hiddenSize*datasetHandler.maxSeqLen if mode != 'seq2vec' else hiddenSize
+        # (v.1.0) inputSize = hiddenSize*datasetHandler.maxSeqLen if mode != 'seq2vec' else hiddenSize
+        inputSize = hiddenSize*maxSeqLen if mode != 'seq2vec' else hiddenSize # v.2.0
         self.FeedForwardLayer = torch.nn.Linear(inputSize, self.vocabSize)            
         
         self.to(self.device)
@@ -358,9 +367,11 @@ class Attention4Rec(torch.nn.Module) :
     baseModel = 'Attention4Rec'
 
     def __init__(self,
-                 datasetHandler:DatasetHandler, 
+                 # (v.1.0) datasetHandler:DatasetHandler, 
+                 maxValueByFeatures:dict, # v.2.0
                  mode:str,
                  method:str,
+                 maxSeqLen:int=49, # v.2.0
                  n_EncLayers:int=1, 
                  encDim:int=128, 
                  nhead:int=4, 
@@ -382,7 +393,7 @@ class Attention4Rec(torch.nn.Module) :
 
         super(Attention4Rec, self).__init__()
         self.device = device if device is not None else 'cuda:0' if torch.cuda.is_available() else 'cpu'
-        self.datasetHandler = datasetHandler
+        # (v.1.0) self.datasetHandler = datasetHandler
         self.mode = mode
         self.method = method
         self.name = Attention4Rec.baseModel + f"+{mode}+{method}+nLayer{n_EncLayers}+encDim{encDim}+nhead{nhead}+hidden{hidden}+dropout{dropoutRatio}+{self.device}"
@@ -395,8 +406,10 @@ class Attention4Rec(torch.nn.Module) :
                      'dropout':dropoutRatio,
                      'device':self.device}
 
-        seqLen = datasetHandler.maxSeqLen
-        vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1 
+        # (v.1.0) seqLen = datasetHandler.maxSeqLen
+        self.seqLen = maxSeqLen # v.2.0
+        # (v.1.0) vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1 
+        vocabSize = maxValueByFeatures['ItemId']+1 # v.2.0
 
         self.Embedding = torch.nn.Embedding(vocabSize, encDim)
         self.EmbDropout = torch.nn.Dropout(embDropoutRatio)
@@ -416,7 +429,8 @@ class Attention4Rec(torch.nn.Module) :
             self.SubGenreEmb.weight = torch.nn.Parameter(embeddedSubGenre)
             self.SubGenreEmb.weight.requires_grad = False
 
-        self.PosEncoder = PosEncoder(seqLen, encDim, device=device)
+        # (v.1.0) self.PosEncoder = PosEncoder(seqLen, encDim, device=device)
+        self.PosEncoder = PosEncoder(self.seqLen, encDim, device=device) # v.2.0
         self.AttentionLayers = torch.nn.ModuleList(
             [AttentionLayer(encDim, nhead, hidden, dropoutRatio, attentionBias, self.device)
             for _ in range(n_EncLayers)]
@@ -440,7 +454,7 @@ class Attention4Rec(torch.nn.Module) :
         padMask = seq.eq(0).to(self.device)
         
         batch_size = seq.shape[0]
-        maxSeqLen = self.datasetHandler.maxSeqLen
+        # (v.1.0) maxSeqLen = self.datasetHandler.maxSeqLen
 
         embeddedSeq = self.Embedding(seq)
         embeddedSeq = self.EmbDropout(embeddedSeq)
@@ -462,7 +476,8 @@ class Attention4Rec(torch.nn.Module) :
             novelScore = torch.matmul(output, self.Embedding.weight.T)
     
         consumMask = torch.zeros_like(novelScore).to(self.device)
-        r_indices = np.zeros((batch_size, maxSeqLen), dtype=int) + np.arange(batch_size).reshape(-1,1)
+        # (v.1.0) r_indices = np.zeros((batch_size, maxSeqLen), dtype=int) + np.arange(batch_size).reshape(-1,1)
+        r_indices = np.zeros((batch_size, self.seqLen), dtype=int) + np.arange(batch_size).reshape(-1,1) # v.2.0
         c_indices = torch.stack(batchedFeatureDict['ItemId']) 
         consumMask[r_indices, c_indices] = 1
         newNovelScore = novelScore.masked_fill(consumMask.bool(), -1e8)        
@@ -520,12 +535,13 @@ class SubGenrePreEmbedding(torch.nn.Module) :
             pk.dump(embedded, f)
 
 class Attention4NovelRec(torch.nn.Module) :
-    # Attention4Rec(mode:'novelRec') 간소화 버전
     baseModel = 'Attention4NovelRec'
 
     def __init__(self,
-                 datasetHandler:DatasetHandler, 
+                 # (v.1.0) datasetHandler:DatasetHandler, 
+                 maxValueByFeatures:dict, # v.2.0
                  method:str,
+                 maxSeqLen:int=49, # v.2.0
                  encDim:int=128,  
                  dropoutRatio:float=0.5,
                  device:str=None,
@@ -542,7 +558,7 @@ class Attention4NovelRec(torch.nn.Module) :
 
         super(Attention4NovelRec, self).__init__()
         self.device = device if device is not None else 'cuda:0' if torch.cuda.is_available() else 'cpu'
-        self.datasetHandler = datasetHandler
+        # (v.1.0) self.datasetHandler = datasetHandler
         self.method = method
         self.name = Attention4NovelRec.baseModel + f"+{method}+encDim{encDim}+dropout{dropoutRatio}+{self.device}"
         self.conf = {'method':method,
@@ -550,8 +566,10 @@ class Attention4NovelRec(torch.nn.Module) :
                      'dropout':dropoutRatio,
                      'device':self.device}
 
-        seqLen = datasetHandler.maxSeqLen
-        vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1 
+        # (v.1.0) seqLen = datasetHandler.maxSeqLen
+        # (v.1.0) vocabSize = datasetHandler.maxValueByFeatures['ItemId']+1 
+        self.maxSeqLen = maxSeqLen # v.2.0
+        vocabSize = maxValueByFeatures['ItemId']+1 # v.2.0
 
         # [ 임베딩/인코딩 레이어 정의 ]
         self.Embedding = torch.nn.Embedding(vocabSize, encDim)
@@ -563,7 +581,8 @@ class Attention4NovelRec(torch.nn.Module) :
         self.SubGenreEmb.weight = torch.nn.Parameter(embeddedSubGenre)
         self.SubGenreEmb.weight.requires_grad = False
 
-        self.PosEncoder = PosEncoder(seqLen, encDim, device=device)
+        # (v.1.0) self.PosEncoder = PosEncoder(seqLen, encDim, device=device)
+        self.PosEncoder = PosEncoder(self.maxSeqLen, encDim, device=device) # v.2.0
     
         # [ 어텐션 레이어 정의 ]
         self.AttentionLayer = BahdanauAttention(encDim,'User',self.device) if self.method=='Bahdanau' else MultiHeadSelfAttention(**attentionConfs)
@@ -578,7 +597,7 @@ class Attention4NovelRec(torch.nn.Module) :
 
         padMask = seq.eq(0).to(self.device)
         batch_size = seq.shape[0]
-        maxSeqLen = self.datasetHandler.maxSeqLen
+        # (v.1.0) maxSeqLen = self.datasetHandler.maxSeqLen
 
         # [ 임베딩 / 인코딩 ]
         embeddedSeq = self.Embedding(seq)
@@ -599,7 +618,8 @@ class Attention4NovelRec(torch.nn.Module) :
 
         # [ 읽은 소설 필터링 ]
         consumMask = torch.zeros_like(novelScore).to(self.device)
-        r_indices = np.zeros((batch_size, maxSeqLen), dtype=int) + np.arange(batch_size).reshape(-1,1)
+        # (v.1.0) r_indices = np.zeros((batch_size, maxSeqLen), dtype=int) + np.arange(batch_size).reshape(-1,1)
+        r_indices = np.zeros((batch_size, self.maxSeqLen), dtype=int) + np.arange(batch_size).reshape(-1,1) # v.2.0
         c_indices = torch.stack(batchedFeatureDict['ItemId']) 
         consumMask[r_indices, c_indices] = 1
         newNovelScore = novelScore.masked_fill(consumMask.bool(), -1e8)        
