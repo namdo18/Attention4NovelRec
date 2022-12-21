@@ -70,7 +70,7 @@ class ModelTrainer :
               metrics:str='recall@20', 
               k_fold:int=4, # v.2.0
               auto_save:bool=True, 
-              verbose:bool=True
+              verbose:bool=False
               ) :
         metricsNames = [f'recall@{i}' for i in [1, 5, 10, 20]]
         if metrics not in metricsNames :
@@ -115,24 +115,41 @@ class ModelTrainer :
             #     batch_shuffle=self.confs['batch_shuffle'][model_idx],
             #     )
             start_time = time()
-            for epoch in tqdm(range(epochs)) :
-                epoch_loss, epoch_acc, epoch_score = self._train_epoch(model, optimizer, trainLoaders, metrics, verbose)
-                inferScore = self.evaluation(evalLoaders=validLoaders, model_idx=model_idx)
+            foldScore, epochScore = defaultdict(int), defaultdict(int) # v.2.0
+            for fold, (trainLoader, validLoader) in enumerate(zip(trainLoaders, validLoaders)) :             
+                for epoch in tqdm(range(epochs)) :
+                    epoch_loss, epoch_acc, epoch_score = self._train_epoch(model, optimizer, trainLoader, metrics, verbose)
+                    inferScore = self.evaluation(evalLoader=validLoader, model_idx=model_idx)
 
-                print(f"\n=== epoch.{epoch} score ===") 
-                print(f">> loss :: {epoch_loss}\n>> acc({metrics}) :: {epoch_acc}")
-                print(f">> recall@k score ::")
-                for k, score in epoch_score.items() :
-                    print(f"    ㄴ{k} : {score}/{inferScore[k]}")
-                print()
+                    print(f"\n=== epoch.{epoch} score ===") 
+                    print(f">> loss :: {epoch_loss}\n>> acc({metrics}) :: {epoch_acc}")
+                    print(f">> recall@k score ::")
+                    for k, score in epoch_score.items() :
+                        print(f"    ㄴ{k} : {score}/{inferScore[k]}")
+                
+                ##### v.2.0 #####
+                else :
+                    for k, score in inferScore.items() :
+                        foldScore[k] += score/k_fold
+                        epochScore[k] += epoch_score[k]/k_fold                        
 
             else :
+                ##### v.2.0 #####
+                if k_fold :
+                    print(f"\n=== fold.{fold} score ===") 
+                    print(f">> recall@k score ::")
+                    for k, score in foldScore.items() :
+                        print(f"    ㄴ{k} : {epochScore[k]}/{score}")
+                    print()
+
                 end_time = time()
                 timeCost = end_time - start_time
                 epoch_score['timeCost'] = timeCost
+                
                 trainConf = {conf:item[model_idx] for conf, item in self.confs.items()}
                 model.name += f'+epoch{epochs}+k{k_fold}'
-                self.history[model.name] = {'epochScore':epoch_score, 'inferScore':inferScore}
+                
+                self.history[model.name] = {'epochScore':epochScore, 'inferScore':foldScore}
                     
                 if auto_save :
                     with open(self.savePath + f'{model.name}.model', 'wb') as f :
@@ -163,7 +180,7 @@ class ModelTrainer :
 
     def evaluation(self, 
                    mode:str='validset', 
-                   evalLoaders:list=None, # v.2.0
+                   evalLoader=None, # v.2.0
                    model_idx:int=None,
                    ) :
         
@@ -174,13 +191,12 @@ class ModelTrainer :
             raise KeyError
 
         ##### v.2.0 #####
-        if mode == 'validset' and evalLoaders is None :
-            print(f"[Error] input-mode'{mode}' needs evalLoaders not None")
+        if mode == 'validset' and evalLoader is None :
+            print(f"[Error] input-mode'{mode}' needs evalLoader not None")
             raise ValueError
 
         if mode == 'testset' :
-            evalLoaders = [self.datasetHandler.callDataLoader(mode='testset')]
-
+            evalLoader = self.datasetHandler.callDataLoader(mode='testset')
 
         # 학습 완료된 모델리스트 대상 평가 시, model_idx=None 유지
         start = 0 if model_idx is None else model_idx
@@ -197,24 +213,21 @@ class ModelTrainer :
             model.eval()
             with torch.no_grad() :                
                 inferScore = defaultdict(int)
-                iter_count = 0
-                for f_idx, evalLoader in enumerate(evalLoaders) : # v.2.0
-                    iter_count += len(iter(evalLoader))
-                    for i, batchedFeatureDict in enumerate(evalLoader) : # v.2.0 i <- iter
-                        newNovelScore = model(batchedFeatureDict)
-                        Y = torch.tensor(batchedFeatureDict['label']).reshape(-1).to(self.device)
-                        recallScore = self._evaluation(newNovelScore, Y)
-                        for k, score in recallScore.items() :
-                            inferScore[k] += score
+                for i, batchedFeatureDict in enumerate(evalLoader) : # v.2.0 i <- iter
+                    newNovelScore = model(batchedFeatureDict)
+                    Y = torch.tensor(batchedFeatureDict['label']).reshape(-1).to(self.device)
+                    recallScore = self._evaluation(newNovelScore, Y)
+                    for k, score in recallScore.items() :
+                        inferScore[k] += score
 
                 # (v.1.0) denom = iter + 1
-                denom = iter_count
+                denom = len(iter(evalLoader))
                 for k in inferScore.keys() :
                     inferScore[k] /= denom
             
             if model_idx is None : # train 중 valid 검증에서 출력되지 않도록
                 print(f"\n===================================")
-                print(f">> model eval: {model.name} ") 
+                print(f">> model eval({mode}): {model.name} ") 
                 for k, score in inferScore.items() :
                     print(f"    ㄴ{k} : {score}")
             else :
@@ -223,42 +236,37 @@ class ModelTrainer :
     def _train_epoch(self, 
                      model, 
                      optimizer, 
-                     # (v.1.0) dataLoader, 
-                     trainLoaders:list, # v.2.0
+                     trainLoader, 
                      metrics, 
                      verbose
                      ) :
         model.train()
         epoch_loss, epoch_acc = 0, 0
         epoch_score = defaultdict(int)
-        iter_count = 0 # v.2.0
-        for f_idx, trainLoader in enumerate(trainLoaders) : # v.2.0
-            iter_count += len(iter(trainLoader)) # v.2.0
-            # (v.1.0) for iter, batchedFeatureDict in enumerate(dataLoader) :
-            for i, batchedFeatureDict in enumerate(trainLoader) : # v.2.0
-                optimizer.zero_grad()
+        
+        for i, batchedFeatureDict in enumerate(trainLoader) :
+            optimizer.zero_grad()
 
-                newNovelScore = model(batchedFeatureDict)
-                Y = torch.tensor(batchedFeatureDict['label']).reshape(-1).to(self.device)
-                loss = torch.nn.functional.cross_entropy(newNovelScore, Y, ignore_index=0)
+            newNovelScore = model(batchedFeatureDict)
+            Y = torch.tensor(batchedFeatureDict['label']).reshape(-1).to(self.device)
+            loss = torch.nn.functional.cross_entropy(newNovelScore, Y, ignore_index=0)
+        
+            loss.backward()
+            optimizer.step()
             
-                loss.backward()
-                optimizer.step()
+            recallScore = self._evaluation(newNovelScore.clone().detach(), Y)
+            for k, score in recallScore.items() :
+                epoch_score[k] += score
+            acc = recallScore[metrics]
+
+            if verbose :
+                print(f">>iter.{i} :: loss.{loss.item()}, acc.{acc}")
+
+            epoch_loss += loss.item()
+            epoch_acc += acc                
                 
-                recallScore = self._evaluation(newNovelScore.clone().detach(), Y)
-                for k, score in recallScore.items() :
-                    epoch_score[k] += score
-                acc = recallScore[metrics]
-
-                epoch_loss += loss.item()
-                epoch_acc += acc
-
-                if verbose :
-                    # (v.1.0) print(f">>iter.{iter} :: loss.{loss.item()}, acc.{acc}")
-                    print(f">>iter.{i}(fold.{f_idx}) :: loss.{loss.item()}, acc.{acc}") # v.2.0
-
         # (v.1.0) denom = iter + 1
-        denom = iter_count # v.2.0
+        denom = len(iter(trainLoader)) # v.2.0
         for k in epoch_score.keys() :
             epoch_score[k] /= denom
         epoch_loss = epoch_loss/denom
