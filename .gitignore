@@ -1,0 +1,9 @@
+# 캐시, 로그, 데이터파일 무시
+*.pyc
+__pycache__
+.DS_Store
+*.csv
+
+# 개발용 파일 무시
+chromedriver_mac64
+*.ipynb
